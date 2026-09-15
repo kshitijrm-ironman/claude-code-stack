@@ -1,0 +1,17 @@
+# Rendered artifacts (generated into %USERPROFILE%, never committed)
+*-silent.rendered.vbs
+
+# Logs from install / verify runs
+*.log
+logs/
+
+# Editor / OS noise
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+~$*
+
+# Local overrides
+install.local.ps1
+config/*.local.*
