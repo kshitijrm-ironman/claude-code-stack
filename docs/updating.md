@@ -150,6 +150,45 @@ claude mcp add playwright -s user -- npx @playwright/mcp@0.0.41
 
 ---
 
+## Ponytail
+
+The plugin tracks the marketplace it came from. Inside a `claude` session:
+
+```
+/plugin marketplace update ponytail
+```
+
+Restart Claude Code afterwards — the `SessionStart` hook is read once, at session
+start, so an upgraded plugin does nothing until the next session.
+
+To remove it:
+
+```
+/plugin uninstall ponytail@ponytail
+```
+
+---
+
+## Graphify
+
+```powershell
+pip install --upgrade graphifyy --allow-scripts
+graphify install --platform windows
+```
+
+Re-run `graphify install` after every upgrade: it refreshes
+`~\.claude\skills\graphify`, which the package ships separately from the CLI. Skip
+it and you get a new binary driven by the old skill.
+
+Existing `graphify-out/` directories survive upgrades but are **not** migrated.
+If a version bump changes the graph schema, rebuild rather than `--update`:
+
+```
+/graphify <path>
+```
+
+---
+
 ## Claude Code
 
 ```powershell

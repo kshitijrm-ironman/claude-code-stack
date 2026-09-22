@@ -19,10 +19,16 @@
 
     Nothing is ever deleted. The .bak directory is left for you to remove once
     you have confirmed the sync looks right.
+
+.PARAMETER LinkPath
+    Override the link location (default ~\.claude\projects). Exists so the
+    migration branches can be exercised in a sandbox without touching real
+    session history - see tests/test-05-link.ps1.
 #>
 [CmdletBinding()]
 param(
-    [string]$OneDrivePath
+    [string]$OneDrivePath,
+    [string]$LinkPath
 )
 
 $ErrorActionPreference = 'Stop'
@@ -45,15 +51,21 @@ $target = $OneDrivePath
 if (-not $target -and $ctx.ContainsKey('OneDrivePath')) { $target = $ctx['OneDrivePath'] }
 if (-not $target) { $target = $ctx.Defaults.OneDriveTarget }
 
-$link = Join-Path $env:USERPROFILE '.claude\projects'
+$link = $LinkPath
+if (-not $link) { $link = Join-Path $env:USERPROFILE '.claude\projects' }
 
 Write-Step 'Linking Claude projects memory to OneDrive'
 Write-Info "link:   $link"
 Write-Info "target: $target"
 
 # ---- target must exist -------------------------------------------------
+# Walk up to the grandparent (D:\OneDrive\Claude\projects -> D:\OneDrive) and
+# require it to exist, so a typo'd or unmounted drive fails loudly instead of
+# silently materialising a new tree. Falls back to the drive root for shallow
+# targets, where the grandparent would be empty.
 $oneDriveRoot = Split-Path -Parent (Split-Path -Parent $target)
-if (-not (Test-Path $oneDriveRoot)) {
+if (-not $oneDriveRoot) { $oneDriveRoot = Split-Path -Qualifier $target -ErrorAction SilentlyContinue }
+if (-not $oneDriveRoot -or -not (Test-Path $oneDriveRoot)) {
     throw "OneDrive root not found: $oneDriveRoot. Pass -OneDrivePath or skip with -SkipSteps 5."
 }
 if (-not (Test-Path $target)) {
@@ -71,7 +83,9 @@ if ($existing -and $existing.LinkType -eq 'SymbolicLink') {
     $currentTarget = @($existing.Target)[0]
     if ($currentTarget -eq $target) {
         Write-Skip "already symlinked to $target"
-        Write-Ok  "$((Get-ChildItem $link -Force -ErrorAction SilentlyContinue).Count) project folder(s) syncing"
+        # @() is load-bearing: under StrictMode, .Count on a bare pipeline result
+        # throws for 0 AND 1 results - it only happens to work from 2 upwards.
+        Write-Ok  "$(@(Get-ChildItem $link -Force -ErrorAction SilentlyContinue).Count) project folder(s) syncing"
         return
     }
     throw "$link is already a symlink but points at '$currentTarget', not '$target'. " +

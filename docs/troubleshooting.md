@@ -193,6 +193,71 @@ claude mcp add headroom -s user -- "$env:APPDATA\Python\Python314\Scripts\headro
 
 ---
 
+## Ponytail never activates
+
+No `PONYTAIL MODE ACTIVE` line at session start, but `/ponytail-help` works.
+
+The skills load from the plugin directory; the always-on ruleset comes from a
+`SessionStart` hook that shells out to Node. If `node` is missing from the
+**non-interactive** shell's PATH the hook produces nothing and fails quietly.
+
+```powershell
+# interactive PATH is not the one that matters
+Start-Process -FilePath node -ArgumentList '--version' -NoNewWindow -Wait
+```
+
+nvm-for-Windows and per-user Node installs are the usual culprits — the shim
+directory is on the interactive profile's PATH only. Fix by putting the real
+`node.exe` directory on the machine or user PATH, then restart Claude Code.
+
+---
+
+## Graphify
+
+### `graphify` is not a recognised command after pip install
+
+`pip install graphifyy` without `--allow-scripts` installs the library but skips
+the post-install step that places the binary and the skill:
+
+```powershell
+pip install --force-reinstall graphifyy --allow-scripts
+graphify install --platform windows
+```
+
+Note the package is **`graphifyy`** (two y's); the command it provides is
+`graphify`.
+
+### `/graphify` says the skill is missing
+
+The package and the skill install separately. `graphify install --platform windows`
+writes `~\.claude\skills\graphify`; confirm and restart Claude Code:
+
+```powershell
+Test-Path "$env:USERPROFILE\.claude\skills\graphify\SKILL.md"
+```
+
+### Build fails with `WinError 123` on the interpreter path
+
+A BOM got written into `graphify-out\.graphify_python`. Delete the cache and
+re-run the build — it re-detects and rewrites the path:
+
+```powershell
+Remove-Item .\graphify-out\.graphify_python
+```
+
+### Graph is stale after a refactor
+
+`--update` only re-extracts files whose content changed; it does not notice
+deletions or moved directories. Rebuild from scratch:
+
+```powershell
+Remove-Item -Recurse -Force .\graphify-out
+```
+
+Then re-run `/graphify`.
+
+---
+
 ## Symlink step fails
 
 ### "A required privilege is not held by the client"
@@ -263,7 +328,10 @@ claude mcp remove headroom -s user
 
 # packages
 npm uninstall -g pxpipe-proxy
-pip uninstall -y headroom-ai mempalace
+pip uninstall -y headroom-ai mempalace graphifyy
+
+# skill (plugin is removed from inside claude: /plugin uninstall ponytail@ponytail)
+Remove-Item -Recurse -Force "$env:USERPROFILE\.claude\skills\graphify"
 
 # symlink (target and its contents survive)
 Remove-Item "$env:USERPROFILE\.claude\projects" -Force

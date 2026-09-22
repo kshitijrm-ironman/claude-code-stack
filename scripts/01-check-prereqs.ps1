@@ -30,6 +30,14 @@ $warn = New-Object System.Collections.Generic.List[string]
 
 Update-SessionPath
 
+# Ensure the npm global bin is in PATH so claude is findable in elevated sessions
+# where the User PATH from the registry may belong to a different account.
+$npmGlobalBin = & npm root -g 2>$null | Select-Object -First 1
+if ($npmGlobalBin) {
+    $npmBin = Split-Path -Parent $npmGlobalBin.Trim()
+    if ($env:Path -notlike "*$npmBin*") { $env:Path += ";$npmBin" }
+}
+
 # ---- OS ----------------------------------------------------------------
 Write-Step 'Operating system'
 try {

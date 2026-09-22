@@ -120,6 +120,32 @@ Note that `headroom-ai` supplies both a proxy and an MCP server from one package
 They are separate processes with separate lifecycles — the proxy is a daemon
 under Task Scheduler, the MCP server is spawned per Claude Code session.
 
+## Plugins and skills
+
+A third layer, independent of both the proxy chain and the MCP servers. Nothing
+here opens a port or spawns a daemon; it all lives inside the Claude Code process.
+
+| Piece | Kind | Where it lands |
+|---|---|---|
+| Ponytail | Plugin (hook + 6 skills) | `~\.claude\plugins\marketplaces\ponytail` |
+| Graphify | Skill + Python CLI | `~\.claude\skills\graphify`, `graphifyy` on PATH |
+
+**Ponytail** registers a `SessionStart` hook. The hook is a small Node script that
+prints its ruleset to stdout, and Claude Code prepends that output to the session
+as an instruction block — which is why `node` has to be resolvable from the
+non-interactive shell, not just an interactive terminal. Failure mode is silent:
+no hook output, no always-on mode, skills still work.
+
+**Graphify** is the inverse shape — the skill is the logic and the package is the
+tool it drives. The skill's first step resolves an interpreter that can
+`import graphify` (uv tool dir → pipx venv → active env) and caches the path in
+`graphify-out\.graphify_python`. Graph state is per-project, written to
+`graphify-out\` next to the scanned files, so it is not shared across machines the
+way `~\.claude\projects` is.
+
+Ordering note: plugins and skills are read at session start. Installing either one
+mid-session does nothing until Claude Code restarts.
+
 ## Memory sync
 
 ```

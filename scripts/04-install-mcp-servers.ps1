@@ -61,7 +61,10 @@ Write-Step 'Playwright MCP'
 # Warm the npx cache and download the browser binary now, so the first
 # Claude Code session that touches Playwright is not blocked on a download.
 Invoke-Change 'npx playwright install chromium' {
-    & npx --yes playwright install chromium 2>&1 |
+    # No 2>&1: in PS 5.1 that wraps stderr lines as ErrorRecords which
+    # $ErrorActionPreference=Stop turns into terminating exceptions even for
+    # harmless npm notices.
+    & npx --yes playwright install chromium |
         Select-Object -Last 8 |
         ForEach-Object { Write-Host "       $_" -ForegroundColor DarkGray }
     if ($LASTEXITCODE -ne 0) {

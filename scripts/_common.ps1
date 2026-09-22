@@ -73,9 +73,14 @@ function Assert-Windows11 {
 # Refreshes the current session's PATH from the registry - needed right after
 # npm/pip install a new shim into a directory this process never saw.
 function Update-SessionPath {
-    $machine = [System.Environment]::GetEnvironmentVariable('Path', 'Machine')
-    $user    = [System.Environment]::GetEnvironmentVariable('Path', 'User')
-    $env:Path = ($machine, $user | Where-Object { $_ }) -join ';'
+    $machine  = [System.Environment]::GetEnvironmentVariable('Path', 'Machine')
+    $user     = [System.Environment]::GetEnvironmentVariable('Path', 'User')
+    $registry = ($machine, $user | Where-Object { $_ }) -join ';'
+    # Merge registry PATH with anything already in the session PATH so that
+    # entries added before calling the installer (e.g. npm global bin in an
+    # elevated session) are not silently dropped.
+    $existing = $env:Path -split ';' | Where-Object { $_ -and ($registry -notlike "*$_*") }
+    $env:Path = ((@($registry) + $existing) | Where-Object { $_ }) -join ';'
 }
 
 function Get-CommandPath {
