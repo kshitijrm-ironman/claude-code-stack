@@ -143,6 +143,18 @@ tool it drives. The skill's first step resolves an interpreter that can
 `graphify-out\` next to the scanned files, so it is not shared across machines the
 way `~\.claude\projects` is.
 
+Graphs built so far:
+
+| Project | Graph |
+|---|---|
+| CODERED PDF Audit | 38 nodes · 66 edges · 8 communities |
+| MarkItDown (`markitdown-app`) | 259 nodes · 446 edges · 8 communities |
+| `steel-invoice-app` | 156 nodes · 316 edges · 14 communities |
+
+Each run also drops a `## graphify` block into that project's `CLAUDE.md` — that
+block, not the graph itself, is what points a later session at `graphify query`
+instead of grep.
+
 Ordering note: plugins and skills are read at session start. Installing either one
 mid-session does nothing until Claude Code restarts.
 
