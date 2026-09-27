@@ -188,7 +188,7 @@ claude                      # then: /plugin marketplace add DietrichGebert/ponyt
 - **Windows 11** (the scripts hard-refuse anything else)
 - **Node.js ≥ 18** with npm on PATH
 - **Python ≥ 3.10** with pip on PATH
-- **Claude Code** (`npm install -g @anthropic-ai/claude-code`)
+- **Claude Code** (`npm install -g @anthropic-ai/claude-code`), tested against **2.1.283**
 - **Administrator** — required for `New-Item -ItemType SymbolicLink` and for
   registering scheduled tasks at `HighestAvailable`
 - **OneDrive** synced, with `D:\OneDrive` present
@@ -310,6 +310,38 @@ Expected:
 - [`docs/architecture.md`](docs/architecture.md) — request path, ports, why the chain is ordered this way
 - [`docs/troubleshooting.md`](docs/troubleshooting.md) — symptoms → fixes
 - [`docs/updating.md`](docs/updating.md) — upgrading each component safely
+- [`docs/pipeline.md`](docs/pipeline.md) — full request/response path with token reduction at each hop
+
+---
+
+## Token Optimization Layer
+
+Layered on top of the proxy chain above (see [`docs/pipeline.md`](docs/pipeline.md) for the
+full picture). Not installed by `install.ps1` — added by hand once per machine.
+
+### RTK (Rust Token Killer)
+
+v0.50.0. Compresses Bash tool output 60-90% before it reaches the model. Binary at
+`C:\Users\kshit\AppData\Roaming\npm\rtk.exe`. Wired in via `rtk init -g`, which
+installs the hook and adds `@RTK.md` to `CLAUDE.md`. Telemetry disabled.
+
+### Caveman
+
+Claude Code plugin, marketplace `JuliusBrussee/caveman`. Compresses Claude's own
+output ~65%.
+
+```
+claude plugin marketplace add JuliusBrussee/caveman
+claude plugin install caveman@caveman
+```
+
+Stats via `/caveman-stats`.
+
+### ccusage
+
+Usage analytics, not compression. `npx ccusage@latest daily`. Baseline measured on
+this setup: 3.65M tokens / $7.79 API-equivalent cost (billed via Max plan
+subscription, not pay-per-token).
 
 ---
 
