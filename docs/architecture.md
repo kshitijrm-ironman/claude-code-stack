@@ -6,7 +6,9 @@ Claude Code never talks to `api.anthropic.com` directly on this machine. Every
 request passes through two local proxies first.
 
 ```
-  Claude Code
+  Bash output ──► RTK hook ──┐              ┌──► Caveman ──► reply text
+                             ▼              │
+  Claude Code ───────────────────────────────
       │  ANTHROPIC_BASE_URL = http://127.0.0.1:8787
       ▼
   Headroom proxy  ──────────────── 127.0.0.1:8787
@@ -20,6 +22,9 @@ request passes through two local proxies first.
 
 Responses return along the same path in reverse. Both hops are plain HTTP on the
 loopback interface; TLS is terminated once, by pxpipe, on the way out.
+
+Compression outside this chain — RTK on Bash tool output, Caveman on reply text —
+is covered in [`pipeline.md`](pipeline.md) and in *Token optimization layer* below.
 
 ## Why two proxies
 
@@ -129,6 +134,8 @@ here opens a port or spawns a daemon; it all lives inside the Claude Code proces
 |---|---|---|
 | Ponytail | Plugin (hook + 6 skills) | `~\.claude\plugins\marketplaces\ponytail` |
 | Graphify | Skill + Python CLI | `~\.claude\skills\graphify`, `graphifyy` on PATH |
+| Caveman | Plugin (output compression) | `~\.claude\plugins\marketplaces\caveman` |
+| RTK | Hook + Rust binary | `%APPDATA%\npm\rtk.exe`, `@RTK.md` imported by `CLAUDE.md` |
 
 **Ponytail** registers a `SessionStart` hook. The hook is a small Node script that
 prints its ruleset to stdout, and Claude Code prepends that output to the session
@@ -157,6 +164,51 @@ instead of grep.
 
 Ordering note: plugins and skills are read at session start. Installing either one
 mid-session does nothing until Claude Code restarts.
+
+## Token optimization layer
+
+Added 2026-09-27, by hand — `install.ps1` does not touch it. Three pieces, three
+different attachment points, no shared state:
+
+| Piece | Attaches to | Cuts |
+|---|---|---|
+| RTK v0.50.0 | Bash tool output, before it enters context | 60-90% |
+| Headroom + pxpipe | the request path itself | 3.4% then 21% |
+| Caveman | Claude's own reply text | ~65% |
+| ccusage | nothing — reads session JSONL after the fact | 0% (reporting) |
+
+Ordering matters only for the proxy pair. RTK fires per Bash call, Caveman shapes
+generation, and neither knows the other exists; either can be removed without
+touching ports, tasks or `ANTHROPIC_BASE_URL`.
+
+RTK is wired by `rtk init -g`, which registers the hook and appends `@RTK.md` to
+the global `CLAUDE.md`. Caveman installs through the Claude Code plugin
+marketplace (`JuliusBrussee/caveman`). Measured baseline on this machine:
+3.65M tokens / $7.79 API-equivalent, billed under the Max plan.
+
+### Worked example
+
+One ordinary debugging session — 12 Bash calls, 20 assistant replies, a fixed
+system prompt and tool definitions on top:
+
+| What enters the context | Vanilla | This stack | Cut by |
+|---|---:|---:|---|
+| Bash tool output (12 calls) | 48,000 | 7,200 | RTK, −85% |
+| Assistant reply text (20 replies) | 30,000 | 10,500 | Caveman, −65% |
+| System prompt + tools + file reads | 60,000 | 60,000 | — |
+| **Context total** | **138,000** | **77,700** | **−44%** |
+| On the wire, last turn | 138,000 | 61,400 | Headroom, a further −21% |
+
+The context total is what matters: the whole transcript is re-sent every turn, so
+the cut applies once per turn, not once per session. Over a 32-turn session that
+is roughly 1.9M tokens billed against 4.4M — and it is the difference between
+compacting three times and not compacting at all.
+
+Percentages are the per-piece figures from the table above; the counts are a
+representative session, not a benchmark. Measure locally with
+`npx ccusage@latest daily`.
+
+Request-path diagram: [`pipeline.md`](pipeline.md).
 
 ## Memory sync
 

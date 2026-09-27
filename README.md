@@ -25,6 +25,9 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 | **OneDrive memory sync** | directory symlink | `~/.claude/projects` lives on OneDrive so session history follows you across machines. |
 | **Ponytail** (`DietrichGebert/ponytail`) | `/plugin marketplace add` + `/plugin install` | Claude Code plugin. Always-on anti-over-engineering ruleset + `/ponytail-*` commands. |
 | **Graphify** (`graphifyy`) | `pip install graphifyy --allow-scripts` | Turns a folder of code/docs into a queryable knowledge graph. Used via the `/graphify` skill. |
+| **RTK** (`rtk.exe`, npm global) | `rtk init -g` | Hook that compresses **Bash tool output** 60-90% before it enters the context window. |
+| **Caveman** (`JuliusBrussee/caveman`) | `/plugin marketplace add` + `/plugin install` | Claude Code plugin. Compresses **Claude's own reply text** ~65%. |
+| **ccusage** | `npx ccusage@latest daily` | Reads session JSONL after the fact and reports token/cost usage. Not in the request path. |
 
 ### pxpipe
 A small Node proxy that sits closest to the network. Everything upstream of it
@@ -57,6 +60,21 @@ knowledge graph from any folder — code, docs, papers, images, video — and wr
 Once `graphify-out/` exists, questions about the codebase get answered from the
 graph (`/graphify query …`, `path`, `explain`) instead of a blind file sweep.
 
+### RTK, Caveman, ccusage
+The token layer, added 2026-09-27. Three different attachment points, no shared
+state:
+
+- **RTK** is a hook on the Bash tool. Command output is rewritten *before* it is
+  appended to the context, so the raw build log never costs a token.
+- **Caveman** is a plugin that shapes generation. It constrains Claude's own reply
+  text, which is the other half of what gets re-sent on every later turn.
+- **ccusage** compresses nothing. It reads the session JSONL and reports what the
+  other pieces saved.
+
+None of them opens a port or touches `ANTHROPIC_BASE_URL`; remove any one and the
+proxy chain is unaffected. Full detail in
+[*Token Optimization Layer*](#token-optimization-layer) below.
+
 ### The chain
 `ANTHROPIC_BASE_URL` is set permanently to `http://127.0.0.1:8787`, so Claude Code
 never contacts Anthropic directly. Requests hop Headroom → pxpipe → Anthropic, and
@@ -67,7 +85,10 @@ responses come back the same way.
 ## Architecture
 
 ```
-                         ┌──────────────────────────┐
+   Bash output ──► RTK hook ──┐                 ┌──► Caveman ──► reply text
+                    −60-90%   │                 │      −65%
+                              ▼                 │
+                         ┌──────────────────────┴───┐
                          │       Claude Code        │
                          │  ANTHROPIC_BASE_URL =    │
                          │   http://127.0.0.1:8787  │
@@ -94,6 +115,8 @@ responses come back the same way.
                         │   api.anthropic.com   │
                         └───────────────────────┘
 
+   ccusage ── reads session JSONL after the fact, never in the request path
+
    MCP servers (stdio, spawned by Claude Code — not part of the proxy chain)
    ├── headroom     headroom.EXE mcp serve
    ├── mempalace    mempalace-mcp
@@ -108,6 +131,21 @@ is not already bound to 47821 when it starts. Ordering is enforced by the delay,
 by a dependency — Task Scheduler has no native "start after" relation.
 
 ---
+
+The token layer added 2026-09-27 sits beside this chain, not inside it:
+
+```
+  Claude Code
+      ├── Bash tool output ──► RTK hook ──► context          −60-90%
+      ├── API requests ──────► Headroom :8787 ──► pxpipe :47821   −3.4% then −21%
+      └── reply text ────────► Caveman plugin                −65%
+
+  ccusage ── reads session JSONL after the fact, never in the request path
+```
+
+Only the middle branch is the proxy chain. RTK and Caveman run inside the Claude
+Code process; removing either leaves ports, tasks and `ANTHROPIC_BASE_URL`
+untouched. Hop-by-hop detail: [`docs/pipeline.md`](docs/pipeline.md).
 
 ## Setup flow
 
@@ -148,6 +186,8 @@ flowchart TD
     Q2 -->|no| T["See docs/troubleshooting.md"]
     T --> V
     Q2 -->|yes| Z(["Stack live — Claude Code → Headroom 8787 → pxpipe 47821 → api.anthropic.com"])
+    Z --> TK["Token layer · manual, not in install.ps1<br/>rtk init -g · plugin install caveman@caveman · npx ccusage@latest daily"]
+    TK --> Z2(["Stack live + compressed<br/>Bash output −60-90% · replies −65% · usage visible in ccusage"])
 ```
 
 The same path as copy-pasteable commands:
@@ -176,6 +216,12 @@ pip install graphifyy --allow-scripts
 graphify install --platform windows
 claude                      # then: /plugin marketplace add DietrichGebert/ponytail
                             #       /plugin install ponytail@ponytail
+
+# --- token layer (also not covered by install.ps1) ---
+rtk init -g                 # hook + @RTK.md import into the global CLAUDE.md
+claude plugin marketplace add JuliusBrussee/caveman
+claude plugin install caveman@caveman
+npx ccusage@latest daily    # baseline before/after
 
 # --- confirm ---
 .\scripts\06-verify-stack.ps1
@@ -342,6 +388,30 @@ Stats via `/caveman-stats`.
 Usage analytics, not compression. `npx ccusage@latest daily`. Baseline measured on
 this setup: 3.65M tokens / $7.79 API-equivalent cost (billed via Max plan
 subscription, not pay-per-token).
+
+### What it actually saves
+
+A worked example — one ordinary debugging session: 12 Bash calls (`git status`,
+`grep`, a test run, a `pip install`) and 20 assistant replies, on top of a fixed
+system prompt, tool definitions and file reads.
+
+| What enters the context | Vanilla Claude Code | This stack | Cut by |
+|---|---:|---:|---|
+| Bash tool output (12 calls) | 48,000 | 7,200 | RTK, −85% |
+| Assistant reply text (20 replies) | 30,000 | 10,500 | Caveman, −65% |
+| System prompt + tools + file reads | 60,000 | 60,000 | — |
+| **Context total** | **138,000** | **77,700** | **−44%** |
+| Sent on the wire (last turn) | 138,000 | 61,400 | Headroom, a further −21% |
+
+The context total is the number that matters, because the whole transcript is
+re-sent on **every** turn. Cutting 60k tokens out of turn 5 does not save 60k
+tokens once — it saves 60k on turn 5 and on every turn after it. Over the 32-turn
+session above that is roughly **1.9M tokens billed vs 4.4M**, and it is also the
+difference between compacting three times and not compacting at all.
+
+The percentages are the per-piece figures from the table at the top of this
+section; the token counts are a representative session, not a benchmark. Measure
+your own with `npx ccusage@latest daily` before and after `rtk init -g`.
 
 ---
 

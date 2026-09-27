@@ -27,3 +27,6 @@ flowchart TD
 - **Caveman** compresses Claude's own reply text, not tool output.
 - **ccusage** doesn't sit in the request path — it reads the local session
   JSONL files after the fact for usage/cost reporting (`npx ccusage@latest daily`).
+
+Worked savings example (one 32-turn debugging session, vanilla vs this stack):
+[`architecture.md` → Worked example](architecture.md#worked-example).
